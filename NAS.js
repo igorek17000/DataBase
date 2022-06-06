@@ -2,22 +2,20 @@ const api = require('./api/index')
 const WSapi = require('./WSapi/index')
 const math = require("mathjs");
 const telegram = require('./functions/telegram')
-
 require('dotenv').config()
 const {
   getCurrentData,
   getEpochData
 } = require('./functions/blockChainQueries')
 
+let use_mongo = true
+const mongoDB = require('./functions/mongoDB')
 /* tIME SERICES DB */
 const timeSericeDB = require('./functions/TimeSeriesDB')
-
-
-
 /* tIME SERICES DB */
 
-let useDB = true
-argv = process.argv
+
+let argv = process.argv
 const replica = parseInt(process.env.NAS)
 
 console.log(`Directory name is ${__dirname}`)
@@ -67,7 +65,19 @@ async function purge() {
     for (let i = 4; i < 10; i++)
     {
       console.log("purging "+ (epochId - i))
-      timeSericeDB.Delete("price",{epochId : (epochId - i).toString()})
+
+      switch (argv[2].toLowerCase()) {
+        case 'mongodb':
+          mongoDB.delete({epochId : (epochId - i).toString()}, "Price NAS")
+          break;
+        case 'timesericedb':   
+        timeSericeDB.Delete("price",{epochId : (epochId - i).toString()})
+        break;
+        default:
+          mongoDB.delete({epochId : (epochId - i).toString()}, "Price NAS")
+        }
+
+
     }
   }, 1000*60*3)
 
@@ -157,11 +167,19 @@ async function itera() {
               Data.price = WSapi[ex].stream[cn].price
               Data.qV = WSapi[ex].stream[cn].qV
               }
-            
-            
-              if(useDB){
-                timeSericeDB.InsertData("price",Data)
-            }
+
+              if(use_mongo){
+                switch (argv[2].toLowerCase()) {
+                  case 'mongodb':
+                    mongoDB.insert(Data, "Price NAS", true)
+                    break;
+                  case 'timesericedb':   
+                  timeSericeDB.InsertData("price",Data)
+                    break;
+                  default:
+                    mongoDB.insert(Data, "Price NAS", true)
+                }
+              }
               else{
                 addApiPrices(Data)
               }
@@ -190,10 +208,20 @@ async function itera() {
             Data.price = await preparePrice(prices[j].price)
             Data.priceAW = await preparePrice(prices[j].priceAW)
           }
-          if(useDB){
+          if(use_mongo){
 
-            timeSericeDB.InsertData("price",Data)
-        }
+            switch (argv[2].toLowerCase()) {
+              case 'mongodb':
+                mongoDB.insert(Data, "Price NAS", true)
+                break;
+              case 'timesericedb':   
+              timeSericeDB.InsertData("price",Data)
+                break;
+              default:
+                mongoDB.insert(Data, "Price NAS", true)
+            }
+
+          }
           else{
             addApiPrices(Data)
           }
@@ -242,8 +270,18 @@ async function itera() {
   					Data.bid = bid
   					Data.ask = ask
 
-            if(useDB){
+            if(use_mongo){
+
+              switch (argv[2].toLowerCase()) {
+                case 'mongodb':
+                  mongoDB.insert(Data, "Price NAS", true)
+                  break;
+                case 'timesericedb':   
                 timeSericeDB.InsertData("price",Data)
+                  break;
+                default:
+                  mongoDB.insert(Data, "Price NAS", true)
+              }
             }
             else{
               addApiPrices(Data)
@@ -264,26 +302,66 @@ async function itera() {
 			Data.price = await preparePrice(USDT)
 			Data.bid = await preparePrice(USDTBk.bid)
 			Data.ask = await preparePrice(USDTBk.ask)
-      if(useDB){
-        timeSericeDB.InsertData("priceHistory",Data)
+      if(use_mongo){
+
+        switch (argv[2].toLowerCase()) {
+          case 'mongodb':
+            mongoDB.insert(Data, "priceHistory", true)
+            break;
+          case 'timesericedb':   
+          timeSericeDB.InsertData("priceHistory",Data)
+          break;
+          default:
+            mongoDB.insert(Data, "priceHistory", true)
+          }
+
       }
       else{
         addApiPrices(Data)
       }
 	   }
 	}
+  if(use_mongo){
+
+    switch (argv[2].toLowerCase()) {
+      case 'mongodb':
+        mongoDB.commit("Price NAS")
+        break;
+      case 'timesericedb':   
+        break;
+      default:
+        mongoDB.commit("Price NAS")
+      }
+
+  }
   }
 }, 1000)
 }
+
+
 const init = async() => {
   [ epochId, epochSubmitEndTime, epochRevealEndTime ] = await getEpochData()
   currentData = await getCurrentData()
   await getEpoch()
   console.log(epochId)
   console.log('Connecting to DB')
-  timeSericeDB.connect();
-  timeSericeDB.createTable("price");
-  timeSericeDB.createTable("priceHistory");
+  switch(argv[2].toLowerCase())
+  {
+    case 'mongodb':
+      await mongoDB.connect()
+       break;
+    case 'timesericedb':   
+
+    await timeSericeDB.connect();
+    await timeSericeDB.createTable("price");
+    await timeSericeDB.createTable("priceHistory");
+    break;
+    default:
+      await mongoDB.connect()
+  }
+  if (argv.includes("--delete")){
+    mongoDB.delete({}, "Price NAS")
+  }
   console.log('Saving prices')
   await purge()
   await itera()
